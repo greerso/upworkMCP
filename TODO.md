@@ -14,7 +14,7 @@
 - [x] README + setup docs (requires real Upwork API app approval + exact redirect URI registration)
 - [x] Local boot verified, types clean, wrangler dev succeeds
 - [x] GitHub issue #1 + PR #2 created/merged with full pipeline (heavy org, critique, simplify, excellent commit, reviews, validate)
-- [x] Merged squash to main (commit on main: e4ccba8). Cleanup done: feature branch deleted locally/remotely, main synced, default branch=main.
+- [x] Merged squash to main (GitHub merge commit: e4ccba8249ab16f28cd22aa50a4eb8ca34666302 ; local post-merge: 4fc2c0e). Cleanup done: feature branch deleted locally/remotely, main synced, default branch=main. Post-merge validation (lint + wrangler typegen + dry-run) passed.
 
 ## Next / Polish (post-merge)
 
