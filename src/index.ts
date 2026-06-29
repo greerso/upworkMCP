@@ -1053,23 +1053,32 @@ class AuthHandler {
       if (!provider) {
         return new Response("OAuth provider not available", { status: 500 });
       }
-      const oauthReqInfo = await provider.parseAuthRequest(request);
-      const clientInfo = await provider.lookupClient(oauthReqInfo.clientId);
+      try {
+        const oauthReqInfo = await provider.parseAuthRequest(request);
+        const clientInfo = await provider.lookupClient(oauthReqInfo.clientId);
 
-      // Auto-grant for now (your server, trusted clients). Assign stable per-client userId so different MCP clients
-      // get separate Upwork connection namespaces (props.userId drives KV keys for tokens/prefs).
-      const mcpUserId = `mcp-${(oauthReqInfo.clientId || "unknown").slice(0, 12)}`;
-      const { redirectTo } = await provider.completeAuthorization({
-        request: oauthReqInfo,
-        userId: mcpUserId,
-        metadata: { label: clientInfo?.clientName || "MCP client", clientId: oauthReqInfo.clientId },
-        scope: oauthReqInfo.scope || [],
-        props: {
+        // Auto-grant for now (your server, trusted clients). Assign stable per-client userId so different MCP clients
+        // get separate Upwork connection namespaces (props.userId drives KV keys for tokens/prefs).
+        const mcpUserId = `mcp-${(oauthReqInfo.clientId || "unknown").slice(0, 12)}`;
+        const { redirectTo } = await provider.completeAuthorization({
+          request: oauthReqInfo,
           userId: mcpUserId,
-          username: clientInfo?.clientName || clientInfo?.clientId || "mcp-user",
-        },
-      });
-      return Response.redirect(redirectTo, 302);
+          metadata: { label: clientInfo?.clientName || "MCP client", clientId: oauthReqInfo.clientId },
+          scope: oauthReqInfo.scope || [],
+          props: {
+            userId: mcpUserId,
+            username: clientInfo?.clientName || clientInfo?.clientId || "mcp-user",
+          },
+        });
+        return Response.redirect(redirectTo, 302);
+      } catch (e: any) {
+        // Robust error for OAuth flow (bad client, invalid request, complete failure, etc.).
+        // In production you could redirect with error params per OAuth spec if redirect_uri is known.
+        return new Response(`Upwork MCP authorize error: ${e?.message || e}`, {
+          status: 400,
+          headers: { "Content-Type": "text/plain" },
+        });
+      }
     }
 
     // Upwork OAuth callback (user-facing)
