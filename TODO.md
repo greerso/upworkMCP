@@ -44,7 +44,7 @@ Real deploy + e2e only viable *after* this fix PR merges + user performs the pla
 - [ ] Update src/index.ts buildRedirectUri + README with your actual worker URL after first deploy (and any dynamic logic)
 - [ ] Create real KV namespaces (UPWORK_TOKENS + OAUTH_KV) and edit the ids in wrangler.jsonc (run cf-typegen after)
 - [ ] Register the exact /upwork/callback URL in your Upwork developer app
-- [x] (from PR#2 post-merge review) Improve the /authorize consent UI — now interactive HTML form with client name, scopes list, approve/deny buttons, double-submit CSRF, and "remembered clients" cookie for auto-approve (see polish/improve-consent-ui branch + this commit). Still recommends full hardening for advanced use.
+- [x] (from PR#2 post-merge review) Improve the /authorize consent UI — now interactive HTML form with client name, scopes list, approve/deny buttons, double-submit CSRF, and "remembered clients" cookie for auto-approve (see polish/improve-consent-ui branch + PR #6). Critical-assessment addressed parser/CSRF-clear/Secure/redirect-join issues pre-merge. Still recommends full hardening (CSP, signed cookies, etc.) for advanced use per agents examples.
 - [ ] Test full flow: MCP client OAuth -> connect_upwork (with tunnel for local) -> real tools against live data
 - [ ] Expand tool surface with more mutations (createJobPosting, endContract*, send messages, milestones, etc.) using shapes from the generated-operations.ts we inspected
 - [ ] Improve MCP-side consent UI (full CSRF + nice HTML + approved clients cookies) - copy advanced patterns from cloudflare/agents/examples/mcp-worker-authenticated (partially addressed by above interactive version)
