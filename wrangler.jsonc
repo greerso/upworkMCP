@@ -26,6 +26,14 @@
       // Run `npx wrangler kv namespace create UPWORK_TOKENS` (and --preview) and replace these placeholder ids
       "id": "00000000000000000000000000000000",
       "preview_id": "00000000000000000000000000000000"
+    },
+    {
+      "binding": "OAUTH_KV",
+      // REQUIRED by @cloudflare/workers-oauth-provider for storing grants/tokens/client info (see storage-schema.md in package).
+      // Run `npx wrangler kv namespace create OAUTH_KV` (and --preview) and replace these placeholder ids.
+      // This was missed in initial PR #2; critical for MCP client OAuth to function.
+      "id": "00000000000000000000000000000000",
+      "preview_id": "00000000000000000000000000000000"
     }
   ],
   "assets": {
