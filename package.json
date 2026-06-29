@@ -9,7 +9,8 @@
 		"start": "wrangler dev",
 		"test": "vitest",
 		"cf-typegen": "wrangler types",
-		"lint": "tsc --noEmit"
+		"lint": "tsc --noEmit",
+		"validate": "node scripts/validate.js"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.12.4",

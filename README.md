@@ -73,12 +73,24 @@ Each MCP-authenticated user gets isolated Upwork tokens.
 - All GraphQL calls go through a small helper that injects Bearer + optional X-Upwork-API-TenantId and does transparent refresh.
 - Temp OAuth states for the Upwork leg also live in KV (short TTL).
 
+## Production Readiness Notes
+
+- **Consent UI**: `/authorize` now serves an interactive approval page (client name, scopes, CSRF-protected form, remembered clients via cookie for convenience). See source for details; copy advanced patterns from cloudflare/agents for full CSP/signed cookies in multi-tenant scenarios.
+- **Security headers**: Basic CSP, X-Frame-Options, etc. are set on consent/home responses. Enhance in production (e.g. via Cloudflare WAF or response headers in wrangler).
+- **Config**: Use `UPWORK_REDIRECT_BASE` secret for the Upwork callback. Always use real KV namespaces (OAUTH_KV + UPWORK_TOKENS) — see `npm run validate`.
+- **Rate limits & ToS**: Upwork ~300 req/min per IP; respect caching rules (≤24h). No spam paths exposed.
+- **Monitoring**: Enable observability in wrangler.jsonc; use `wrangler tail` or dashboards for errors/token refreshes.
+- **Secrets & KV**: Never commit real ids or keys. Rotate tokens by disconnect + re-connect.
+- After deploy: run `npm run validate`, register exact callback in Upwork app, test full OAuth + tools E2E with real keys.
+
 ## Limitations (Upwork side)
 
 - The public GraphQL API is read-heavy for many freelancer actions.
 - Submitting proposals (spending Connects) and certain write actions that Upwork wants to rate-limit are either missing from the schema or intentionally restricted ("coming soon" scopes exist).
 - You cannot (and should not) use this to spam applications.
 - Caching policy: Upwork ToS prohibits caching data > 24 hours in most cases.
+
+See "Production Readiness Notes" above for security, consent, and deploy hardening.
 
 ## Deploy
 

@@ -867,6 +867,20 @@ export class UpworkMCP extends McpAgent<Env, State, McpUserProps> {
       }
     );
 
+    this.server.resource(
+      "recent-proposals",
+      "upwork://me/proposals",
+      async (uri) => {
+        const tokens = await this.ensureFreshUpworkToken();
+        const prefs = await this.getUserPrefs();
+        const q = `query Proposals($limit: Int) { vendorProposals(limit: $limit) { items { id title status createdDateTime } } }`;
+        const data = await callUpworkGraphQL(q, { limit: 5 }, this.runtimeEnv, tokens, prefs?.defaultTenantId);
+        return {
+          contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(data?.data || data, null, 2) }],
+        };
+      }
+    );
+
     // ------------------------------------------------------------------
     // PROMPTS
     // ------------------------------------------------------------------
@@ -1142,6 +1156,11 @@ class AuthHandler {
         const html = renderConsentHtml(clientInfo, oauthReqInfo, csrfToken, url.search);
         const headers = new Headers({ "Content-Type": "text/html; charset=utf-8" });
         headers.append("Set-Cookie", `csrfToken=${csrfToken}; Path=/authorize; Max-Age=300; HttpOnly; SameSite=Lax; Secure`);
+        // Production security headers (CSP for consent form, etc.)
+        headers.append("Content-Security-Policy", "default-src 'self'; form-action 'self'; frame-ancestors 'none'; style-src 'unsafe-inline';");
+        headers.append("X-Frame-Options", "DENY");
+        headers.append("X-Content-Type-Options", "nosniff");
+        headers.append("Referrer-Policy", "no-referrer");
         return new Response(html, { headers });
       } catch (e: any) {
         // Robust error handling with OAuth redirect when possible
@@ -1182,10 +1201,17 @@ class AuthHandler {
         { headers: { "Content-Type": "text/html" } }
       );
     }
+    // Note: the / home is often served by ASSETS binding (public/index.html) in practice; the above is fallback.
+    // Add security headers to the response if using the code path.
+    // (Assets responses would need wrangler config or middleware for prod headers.)
 
     // Delegate other routes (including full OAuth consent UI) to the provider's helpers or a full Hono app if you expand.
     // Consent UI for /authorize is now implemented above (interactive form + CSRF + remembered clients).
-    return new Response("Not found", { status: 404 });
+    const notFound = new Response("Not found", { status: 404 });
+    notFound.headers.append("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none';");
+    notFound.headers.append("X-Frame-Options", "DENY");
+    notFound.headers.append("X-Content-Type-Options", "nosniff");
+    return notFound;
   }
 }
 
