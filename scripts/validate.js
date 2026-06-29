@@ -62,7 +62,18 @@ if (/https:\/\/upwork-mcp\.<YOUR_SUBDOMAIN>/.test(src)) {
   warn('Placeholder redirect still in src/index.ts fallback (expected until UPWORK_REDIRECT_* secret set + deploy).');
 }
 
-// 5. Basic package sanity
+// 5. Check for doc drift / stale references to shipped polish (per critical-assessment)
+const publicHtml = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+if (publicHtml.includes('the constant in src/index.ts')) {
+  warn('Stale text in public/index.html ("the constant in src/index.ts"). Update to reflect env/secret + validate.');
+}
+
+const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+if (readme.includes('Better consent UI for the MCP OAuth leg (copy advanced patterns from agents examples + add CSRF/approved clients).') || readme.includes('Dynamic redirect URI (derive from the original request')) {
+  warn('README Next Steps / Polish Ideas still lists future items for shipped polish (consent UI, configurable redirect). Prune or mark as done.');
+}
+
+// 6. Basic package sanity
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
 if (!pkg.scripts.validate) {
   warn('No "validate" script in package.json (this script itself).');

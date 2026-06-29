@@ -933,13 +933,14 @@ export class UpworkMCP extends McpAgent<Env, State, McpUserProps> {
   // Internal helpers (available on the agent instance)
   // ------------------------------------------------------------------
   private buildRedirectUri(): string {
-    // Supports UPWORK_REDIRECT_BASE (full origin or origin+path, e.g. https://.../sub) or UPWORK_REDIRECT_HOST.
-    // Uses URL join so path components are handled correctly. Falls back to placeholder (must be replaced before
-    // real Upwork app registration + deploy). Must *exactly* match the redirect URI registered in your Upwork app.
+    // Supports UPWORK_REDIRECT_BASE (full https://... ) or UPWORK_REDIRECT_HOST.
+    // Uses new URL (leading / forces root /upwork/callback; path in base is ignored — standard for Workers at origin root).
+    // 'origin+path' in older comments was aspirational; callback always at /upwork/callback to match registration.
+    // Falls back to placeholder (must be replaced before real Upwork app registration + deploy).
+    // Must *exactly* match the redirect URI registered in your Upwork developer app.
     const e = this.runtimeEnv as any;
     const rawBase = e.UPWORK_REDIRECT_BASE || e.UPWORK_REDIRECT_HOST || "https://upwork-mcp.<YOUR_SUBDOMAIN>.workers.dev";
     const base = rawBase.startsWith("http") ? rawBase : `https://${rawBase}`;
-    // Join ensures /upwork/callback is appended to the origin (or existing path) correctly.
     return new URL("/upwork/callback", base).toString();
   }
 

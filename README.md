@@ -76,8 +76,9 @@ Each MCP-authenticated user gets isolated Upwork tokens.
 ## Production Readiness Notes
 
 - **Consent UI**: `/authorize` now serves an interactive approval page (client name, scopes, CSRF-protected form, remembered clients via cookie for convenience). See source for details; copy advanced patterns from cloudflare/agents for full CSP/signed cookies in multi-tenant scenarios.
-- **Security headers**: Basic CSP, X-Frame-Options, etc. are set on consent/home responses. Enhance in production (e.g. via Cloudflare WAF or response headers in wrangler).
+- **Security headers**: Basic CSP, X-Frame-Options, etc. are set on /authorize consent form and 404 responses (via shared helper). Home page is primarily served via ASSETS binding (public/index.html; enhance via wrangler.jsonc [headers] or CF WAF/middleware per code comments). /upwork/callback and error paths now also get them for consistency. See src for appendSecurityHeaders and wrangler for static headers example.
 - **Config**: Use `UPWORK_REDIRECT_BASE` secret for the Upwork callback. Always use real KV namespaces (OAUTH_KV + UPWORK_TOKENS) — see `npm run validate`.
+- **Dev for consent UI + cookies**: The new interactive /authorize + remembered clients use Secure cookies. Standard `wrangler dev` (http) will not set/send them (browser policy), so no auto-approve and CSRF checks may fail on POST. Use https tunnel (cloudflared/ngrok) for full local OAuth + consent testing, or test the form UI in http (it still renders and submits; errors surface gracefully). Prod (workers.dev https) is unaffected.
 - **Rate limits & ToS**: Upwork ~300 req/min per IP; respect caching rules (≤24h). No spam paths exposed.
 - **Monitoring**: Enable observability in wrangler.jsonc; use `wrangler tail` or dashboards for errors/token refreshes.
 - **Secrets & KV**: Never commit real ids or keys. Rotate tokens by disconnect + re-connect.
