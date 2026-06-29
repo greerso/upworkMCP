@@ -432,7 +432,7 @@ export class UpworkMCP extends McpAgent<Env, State, Record<string, unknown>> {
       },
       async ({ query, limit, contractType, minHourly, maxHourly }) => {
         const tokens = await this.ensureFreshUpworkToken();
-        const prefs = (await this.runtimeEnv.UPWORK_TOKENS.get(`prefs:${this.userId}`, "json")) as any;
+        const prefs = await this.getUserPrefs();
         const tenant = prefs?.defaultTenantId;
 
         // marketplaceJobPostingsSearch is the primary one for logged-in freelancers
@@ -503,7 +503,7 @@ export class UpworkMCP extends McpAgent<Env, State, Record<string, unknown>> {
       },
       async ({ jobPostingId }) => {
         const tokens = await this.ensureFreshUpworkToken();
-        const prefs = (await this.runtimeEnv.UPWORK_TOKENS.get(`prefs:${this.userId}`, "json")) as any;
+        const prefs = await this.getUserPrefs();
         const q = `
           query JobPosting($jobPostingId: String!) {
             jobPosting(jobPostingId: $jobPostingId) {
@@ -533,7 +533,7 @@ export class UpworkMCP extends McpAgent<Env, State, Record<string, unknown>> {
       },
       async ({ limit }) => {
         const tokens = await this.ensureFreshUpworkToken();
-        const prefs = (await this.runtimeEnv.UPWORK_TOKENS.get(`prefs:${this.userId}`, "json")) as any;
+        const prefs = await this.getUserPrefs();
         const q = `
           query ContractList($limit: Int) {
             contractList(limit: $limit) {
@@ -561,7 +561,7 @@ export class UpworkMCP extends McpAgent<Env, State, Record<string, unknown>> {
       },
       async ({ contractId }) => {
         const tokens = await this.ensureFreshUpworkToken();
-        const prefs = (await this.runtimeEnv.UPWORK_TOKENS.get(`prefs:${this.userId}`, "json")) as any;
+        const prefs = await this.getUserPrefs();
         const q = `
           query Contract($id: ID!) {
             contract(id: $id) {
@@ -610,7 +610,7 @@ export class UpworkMCP extends McpAgent<Env, State, Record<string, unknown>> {
         }
 
         const tokens = await this.ensureFreshUpworkToken();
-        const prefs = (await this.runtimeEnv.UPWORK_TOKENS.get(`prefs:${this.userId}`, "json")) as any;
+        const prefs = await this.getUserPrefs();
 
         const mutation = `
           mutation CreateOffer($input: CreateOfferInput!) {
@@ -644,7 +644,7 @@ export class UpworkMCP extends McpAgent<Env, State, Record<string, unknown>> {
       },
       async ({ asClient, limit }) => {
         const tokens = await this.ensureFreshUpworkToken();
-        const prefs = (await this.runtimeEnv.UPWORK_TOKENS.get(`prefs:${this.userId}`, "json")) as any;
+        const prefs = await this.getUserPrefs();
         const field = asClient ? "clientProposals" : "vendorProposals";
         const q = `
           query Proposals($limit: Int) {
@@ -670,7 +670,7 @@ export class UpworkMCP extends McpAgent<Env, State, Record<string, unknown>> {
       },
       async ({ limit }) => {
         const tokens = await this.ensureFreshUpworkToken();
-        const prefs = (await this.runtimeEnv.UPWORK_TOKENS.get(`prefs:${this.userId}`, "json")) as any;
+        const prefs = await this.getUserPrefs();
         const q = `
           query RoomList($limit: Int) {
             roomList(limit: $limit) {
@@ -691,7 +691,7 @@ export class UpworkMCP extends McpAgent<Env, State, Record<string, unknown>> {
       },
       async ({ roomId, limit }) => {
         const tokens = await this.ensureFreshUpworkToken();
-        const prefs = (await this.runtimeEnv.UPWORK_TOKENS.get(`prefs:${this.userId}`, "json")) as any;
+        const prefs = await this.getUserPrefs();
         const q = `
           query RoomStories($roomId: ID!, $limit: Int) {
             roomStories(roomId: $roomId, limit: $limit) {
@@ -715,7 +715,7 @@ export class UpworkMCP extends McpAgent<Env, State, Record<string, unknown>> {
       },
       async () => {
         const tokens = await this.ensureFreshUpworkToken();
-        const prefs = (await this.runtimeEnv.UPWORK_TOKENS.get(`prefs:${this.userId}`, "json")) as any;
+        const prefs = await this.getUserPrefs();
         const q = `
           query Me {
             user { id name email photoUrl }
@@ -735,7 +735,7 @@ export class UpworkMCP extends McpAgent<Env, State, Record<string, unknown>> {
       },
       async ({ query, limit }) => {
         const tokens = await this.ensureFreshUpworkToken();
-        const prefs = (await this.runtimeEnv.UPWORK_TOKENS.get(`prefs:${this.userId}`, "json")) as any;
+        const prefs = await this.getUserPrefs();
         const q = `
           query SearchTalent($query: String, $limit: Int) {
             talentProfiles(query: $query, limit: $limit) {
@@ -770,7 +770,7 @@ export class UpworkMCP extends McpAgent<Env, State, Record<string, unknown>> {
       async ({ query, variables = {}, tenantId, confirm }) => {
         const isMutation = /^\s*mutation/i.test(query);
         const tokens = await this.ensureFreshUpworkToken();
-        const prefs = (await this.runtimeEnv.UPWORK_TOKENS.get(`prefs:${this.userId}`, "json")) as any;
+        const prefs = await this.getUserPrefs();
         const effectiveTenant = tenantId || prefs?.defaultTenantId;
 
         if (isMutation && !confirm) {
@@ -803,7 +803,7 @@ export class UpworkMCP extends McpAgent<Env, State, Record<string, unknown>> {
       },
       async ({ query, limit }) => {
         const tokens = await this.ensureFreshUpworkToken();
-        const prefs = (await this.runtimeEnv.UPWORK_TOKENS.get(`prefs:${this.userId}`, "json")) as any;
+        const prefs = await this.getUserPrefs();
         const q = `
           query OntologySkills($query: String, $limit: Int) {
             ontologySkills(query: $query, limit: $limit) {
@@ -824,7 +824,7 @@ export class UpworkMCP extends McpAgent<Env, State, Record<string, unknown>> {
       "upwork://me/profile",
       async (uri) => {
         const tokens = await this.ensureFreshUpworkToken();
-        const prefs = (await this.runtimeEnv.UPWORK_TOKENS.get(`prefs:${this.userId}`, "json")) as any;
+        const prefs = await this.getUserPrefs();
         const q = `query Me { user { id name email photoUrl } organization { id name } }`;
         const data = await callUpworkGraphQL(q, {}, this.runtimeEnv, tokens, prefs?.defaultTenantId);
         return {
@@ -844,7 +844,7 @@ export class UpworkMCP extends McpAgent<Env, State, Record<string, unknown>> {
       "upwork://me/contracts",
       async (uri) => {
         const tokens = await this.ensureFreshUpworkToken();
-        const prefs = (await this.runtimeEnv.UPWORK_TOKENS.get(`prefs:${this.userId}`, "json")) as any;
+        const prefs = await this.getUserPrefs();
         const q = `query ContractList($limit: Int) { contractList(limit: $limit) { items { id title status amount { displayValue } } } }`;
         const data = await callUpworkGraphQL(q, { limit: 10 }, this.runtimeEnv, tokens, prefs?.defaultTenantId);
         return {
@@ -919,6 +919,10 @@ export class UpworkMCP extends McpAgent<Env, State, Record<string, unknown>> {
     UPWORK_TOKENS: any;
   } {
     return (this as any).env;
+  }
+
+  private async getUserPrefs(): Promise<any> {
+    return (await this.runtimeEnv.UPWORK_TOKENS.get(`prefs:${this.userId}`, "json")) || {};
   }
 
   private async ensureFreshUpworkToken(): Promise<UpworkTokenData | null> {
