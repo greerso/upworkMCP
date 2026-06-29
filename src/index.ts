@@ -1010,23 +1010,29 @@ async function handleUpworkCallback(request: Request, env: Env): Promise<Respons
   const error = url.searchParams.get("error");
 
   if (error) {
-    return new Response(upworkCallbackErrorHtml(`Upwork error: ${error}`), {
+    const r = new Response(upworkCallbackErrorHtml(`Upwork error: ${error}`), {
       headers: { "Content-Type": "text/html" },
     });
+    appendSecurityHeaders(r);
+    return r;
   }
   if (!code || !state) {
-    return new Response(upworkCallbackErrorHtml("Missing code or state"), {
+    const r = new Response(upworkCallbackErrorHtml("Missing code or state"), {
       headers: { "Content-Type": "text/html" },
       status: 400,
     });
+    appendSecurityHeaders(r);
+    return r;
   }
 
   const payload = await loadTempOAuthState(env.UPWORK_TOKENS, state);
   if (!payload) {
-    return new Response(upworkCallbackErrorHtml("Invalid or expired state. Please restart the connect flow from the MCP client."), {
+    const r = new Response(upworkCallbackErrorHtml("Invalid or expired state. Please restart the connect flow from the MCP client."), {
       headers: { "Content-Type": "text/html" },
       status: 400,
     });
+    appendSecurityHeaders(r);
+    return r;
   }
 
   const clientId = (env as any).UPWORK_CLIENT_ID as string;
@@ -1034,10 +1040,12 @@ async function handleUpworkCallback(request: Request, env: Env): Promise<Respons
   const redirectUri = payload.redirectUri;
 
   if (!clientId || !clientSecret) {
-    return new Response(upworkCallbackErrorHtml("Server missing UPWORK_CLIENT_ID/SECRET"), {
+    const r = new Response(upworkCallbackErrorHtml("Server missing UPWORK_CLIENT_ID/SECRET"), {
       headers: { "Content-Type": "text/html" },
       status: 500,
     });
+    appendSecurityHeaders(r);
+    return r;
   }
 
   try {
@@ -1047,14 +1055,18 @@ async function handleUpworkCallback(request: Request, env: Env): Promise<Respons
     // Optional: auto-set a tenant if we can fetch it
     // (left as exercise or future improvement)
 
-    return new Response(upworkCallbackSuccessHtml(), {
+    const r = new Response(upworkCallbackSuccessHtml(), {
       headers: { "Content-Type": "text/html" },
     });
+    appendSecurityHeaders(r);
+    return r;
   } catch (e: any) {
-    return new Response(upworkCallbackErrorHtml(String(e.message || e)), {
+    const r = new Response(upworkCallbackErrorHtml(String(e.message || e)), {
       headers: { "Content-Type": "text/html" },
       status: 500,
     });
+    appendSecurityHeaders(r);
+    return r;
   }
 }
 
@@ -1156,11 +1168,7 @@ class AuthHandler {
         const html = renderConsentHtml(clientInfo, oauthReqInfo, csrfToken, url.search);
         const headers = new Headers({ "Content-Type": "text/html; charset=utf-8" });
         headers.append("Set-Cookie", `csrfToken=${csrfToken}; Path=/authorize; Max-Age=300; HttpOnly; SameSite=Lax; Secure`);
-        // Production security headers (CSP for consent form, etc.)
-        headers.append("Content-Security-Policy", "default-src 'self'; form-action 'self'; frame-ancestors 'none'; style-src 'unsafe-inline';");
-        headers.append("X-Frame-Options", "DENY");
-        headers.append("X-Content-Type-Options", "nosniff");
-        headers.append("Referrer-Policy", "no-referrer");
+        appendSecurityHeaders({ headers });
         return new Response(html, { headers });
       } catch (e: any) {
         // Robust error handling with OAuth redirect when possible
@@ -1187,8 +1195,7 @@ class AuthHandler {
 
     // Basic home / discovery page
     if (url.pathname === "/" || url.pathname === "") {
-      return new Response(
-        `<!doctype html>
+      const homeHtml = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Upwork MCP</title></head>
 <body style="font-family:system-ui;padding:2rem;max-width:720px;margin:auto">
 <h1>Upwork MCP Server</h1>
@@ -1197,9 +1204,10 @@ class AuthHandler {
 <p>OAuth endpoints: <code>/authorize</code>, <code>/token</code>, <code>/register</code></p>
 <p>Upwork connect callback: <code>/upwork/callback</code></p>
 <p>See README for setup and scopes.</p>
-</body></html>`,
-        { headers: { "Content-Type": "text/html" } }
-      );
+</body></html>`;
+      const homeResp = new Response(homeHtml, { headers: { "Content-Type": "text/html" } });
+      appendSecurityHeaders(homeResp);
+      return homeResp;
     }
     // Note: the / home is often served by ASSETS binding (public/index.html) in practice; the above is fallback.
     // Add security headers to the response if using the code path.
@@ -1208,11 +1216,17 @@ class AuthHandler {
     // Delegate other routes (including full OAuth consent UI) to the provider's helpers or a full Hono app if you expand.
     // Consent UI for /authorize is now implemented above (interactive form + CSRF + remembered clients).
     const notFound = new Response("Not found", { status: 404 });
-    notFound.headers.append("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none';");
-    notFound.headers.append("X-Frame-Options", "DENY");
-    notFound.headers.append("X-Content-Type-Options", "nosniff");
+    appendSecurityHeaders(notFound);
     return notFound;
   }
+}
+
+function appendSecurityHeaders(target: Response | { headers: Headers }) {
+  const h = target instanceof Response ? target.headers : target.headers;
+  h.append("Content-Security-Policy", "default-src 'self'; form-action 'self'; frame-ancestors 'none'; style-src 'unsafe-inline';");
+  h.append("X-Frame-Options", "DENY");
+  h.append("X-Content-Type-Options", "nosniff");
+  h.append("Referrer-Policy", "no-referrer");
 }
 
 // --- Consent UI helpers (polish improvement over auto-grant) ---

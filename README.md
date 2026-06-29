@@ -118,15 +118,21 @@ Unofficial. Not affiliated with Upwork. Comply with Upwork's API Terms of Use (h
 
 Built following the Cloudflare "build-mcp" skill / Agents SDK patterns for remote MCP servers.
 
-## Next Steps / Polish Ideas
+## Next Steps / Polish Ideas (post current polish)
 
-- Dynamic redirect URI (derive from the original request that triggered connect, or a user setting).
-- Richer structured content responses (instead of just text JSON dumps).
-- Background scheduled jobs per user (e.g. new job alerts via workflows + push/email).
-- Better consent UI for the MCP OAuth leg (copy advanced patterns from agents examples + add CSRF/approved clients).
-- Optional D1 or SQLite user prefs instead of KV for everything.
+Many items require real deploy + Upwork keys + E2E (see TODO.md "Next / Polish"):
 
-PRs welcome.
+- Real KV namespaces (UPWORK_TOKENS + OAUTH_KV) + edit ids + Upwork app callback registration + approval.
+- Full E2E test of MCP client OAuth (new interactive consent) + connect_upwork + live tools + refresh + isolation + elicitation.
+- Expand tool surface with more mutations (using shapes from community generators).
+- Add unit tests for helpers (mocked fetch; basic endpoint tests added).
+- More resources/prompts (recent-proposals added; job templates, stories, etc.).
+- Advanced consent (full CSP/signed cookies per agents mcp-worker-authenticated; current is interactive+CSRF+remembered for v1 self-hosted).
+- Background jobs, /connect-upwork UI page, per-tool redirect (advanced), harvest common queries to dedicated tools.
+
+Run `npm run validate` as a pre-deploy gate. PRs welcome for the rest.
+
+See README "Production Readiness Notes" and TODO for current status.
 
 ---
 
