@@ -1,6 +1,6 @@
 # upworkMCP TODO
 
-## Current
+## Shipped (merged via git-to-pr)
 
 - [x] Discovered Upwork GraphQL API (api.upwork.com/graphql, OAuth2, 75 queries / 52 mutations from community generator + official docs)
 - [x] Scaffoled with cloudflare/agents-starter + agents + @modelcontextprotocol/sdk + workers-oauth-provider per /build-mcp skill
@@ -13,9 +13,10 @@
   - Elicitation on writes
 - [x] README + setup docs (requires real Upwork API app approval + exact redirect URI registration)
 - [x] Local boot verified, types clean, wrangler dev succeeds
-- [x] GitHub issue created: https://github.com/greerso/upworkMCP/issues/1 (organized via git-to-pr flow)
+- [x] GitHub issue #1 + PR #2 created/merged with full pipeline (heavy org, critique, simplify, excellent commit, reviews, validate)
+- [x] Merged squash to main (commit on main: e4ccba8). Cleanup done: feature branch deleted locally/remotely, main synced, default branch=main.
 
-## Next / Polish (post initial PR)
+## Next / Polish (post-merge)
 
 - [ ] Update src/index.ts buildRedirectUri + README with your actual worker URL after first deploy
 - [ ] Create real KV namespaces and edit the ids in wrangler.jsonc
