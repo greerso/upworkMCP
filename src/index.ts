@@ -33,13 +33,16 @@
  * KV setup (one-time):
  *   npx wrangler kv namespace create UPWORK_TOKENS
  *   npx wrangler kv namespace create UPWORK_TOKENS --preview
- *   Paste the resulting ids into wrangler.jsonc (replace the placeholder ids)
+ *   npx wrangler kv namespace create OAUTH_KV
+ *   npx wrangler kv namespace create OAUTH_KV --preview
+ *   Paste the resulting ids into wrangler.jsonc (replace the placeholder ids).
+ *   OAUTH_KV is required by the workers-oauth-provider for MCP client grants/tokens.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
 import { z } from "zod";
-import { OAuthProvider, type AuthRequest, type OAuthHelpers } from "@cloudflare/workers-oauth-provider";
+import { OAuthProvider, type OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 
 declare type ExecutionContext = any; // Provided by Cloudflare Workers runtime + wrangler types
 
@@ -60,7 +63,7 @@ interface UpworkTokenData {
   token_type?: string;
 }
 
-interface McpUserProps {
+interface McpUserProps extends Record<string, unknown> {
   userId: string;
   username?: string;
   email?: string;
@@ -205,14 +208,23 @@ async function callUpworkGraphQL(
     body: JSON.stringify({ query, variables }),
   });
 
-  const json: any = await res.json();
+  const text = await res.text();
+  let json: any = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    // non-JSON body (e.g. HTML error page, plain text); preserve text for error msg
+  }
 
-  if (!res.ok || json.errors) {
-    const msg = json.errors?.map((e: any) => e.message).join("; ") || `HTTP ${res.status}`;
+  if (!res.ok || (json && json.errors)) {
+    const msg =
+      (json && json.errors?.map((e: any) => e.message).join("; ")) ||
+      (text && text.slice(0, 500)) ||
+      `HTTP ${res.status}`;
     throw new Error(`Upwork GraphQL error: ${msg}`);
   }
 
-  return json;
+  return json || {};
 }
 
 // ============================================================================
@@ -254,7 +266,7 @@ async function loadTempOAuthState(kv: any, state: string) {
 // The McpAgent
 // ============================================================================
 
-export class UpworkMCP extends McpAgent<Env, State, Record<string, unknown>> {
+export class UpworkMCP extends McpAgent<Env, State, McpUserProps> {
   server = new McpServer({
     name: "upwork-mcp",
     version: "0.1.0",
@@ -263,15 +275,13 @@ export class UpworkMCP extends McpAgent<Env, State, Record<string, unknown>> {
 
   initialState: State = {};
 
-  // Helper to get current MCP user id from OAuth props
+  // Helper to get current MCP user id from OAuth props (now type-safe via the McpAgent generic + completeAuthorization props)
   private get userId(): string {
-    const p = this.props as any;
-    return p?.userId || "anonymous";
+    return this.props?.userId || "anonymous";
   }
 
   private get username(): string {
-    const p = this.props as any;
-    return p?.username || p?.email || this.userId;
+    return this.props?.username || this.props?.email || this.userId;
   }
 
   async init() {
@@ -1029,6 +1039,56 @@ async function handleUpworkCallback(request: Request, env: Env): Promise<Respons
 class AuthHandler {
   static async fetch(request: Request, env: Env & { OAUTH_PROVIDER?: OAuthHelpers }, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    // MCP client OAuth 2.1 consent flow (required for /mcp bearer tokens + props.userId isolation).
+    // Minimal auto-approve implementation for v1 personal/self-hosted use (per-client userId for Upwork token isolation).
+    // This was missing in PR #2 (critical: made advertised "Secure remote MCP (OAuthProvider)" non-functional).
+    // See node_modules/@cloudflare/workers-oauth-provider/README.md for full pattern + completeAuthorization contract.
+    // Future: interactive HTML consent form (POST-back), CSRF, approved-clients cookie allowlist, nice UI.
+    // Matches TODO polish item and cloudflare/agents/examples/mcp-worker-authenticated.
+    if (url.pathname === "/authorize") {
+      const provider = env.OAUTH_PROVIDER;
+      if (!provider) {
+        return new Response("OAuth provider not available", { status: 500 });
+      }
+      let oauthReqInfo: any = null;
+      try {
+        oauthReqInfo = await provider.parseAuthRequest(request);
+        const clientInfo = await provider.lookupClient(oauthReqInfo.clientId);
+
+        // Auto-grant for now (your server, trusted clients). Assign stable per-client userId so different MCP clients
+        // get separate Upwork connection namespaces (props.userId drives KV keys for tokens/prefs).
+        const mcpUserId = `mcp-${oauthReqInfo.clientId || "unknown"}`;
+        const { redirectTo } = await provider.completeAuthorization({
+          request: oauthReqInfo,
+          userId: mcpUserId,
+          metadata: { label: clientInfo?.clientName || "MCP client", clientId: oauthReqInfo.clientId },
+          scope: oauthReqInfo.scope || [],
+          props: {
+            userId: mcpUserId,
+            username: clientInfo?.clientName || clientInfo?.clientId || "mcp-user",
+          },
+        });
+        return Response.redirect(redirectTo, 302);
+      } catch (e: any) {
+        // Robust error for OAuth flow. If we have the redirect info from a successful parse, return a proper
+        // OAuth error redirect to the client's redirect_uri (with state) per the auth code flow.
+        // Otherwise fall back to a plain error response.
+        if (oauthReqInfo?.redirectUri) {
+          const params = new URLSearchParams({
+            error: "server_error",
+            error_description: String(e?.message || e || "authorize failed"),
+            state: oauthReqInfo.state || "",
+          });
+          const errUrl = `${oauthReqInfo.redirectUri}?${params.toString()}`;
+          return Response.redirect(errUrl, 302);
+        }
+        return new Response(`Upwork MCP authorize error: ${e?.message || e}`, {
+          status: 400,
+          headers: { "Content-Type": "text/plain" },
+        });
+      }
+    }
 
     // Upwork OAuth callback (user-facing)
     if (url.pathname === "/upwork/callback") {
