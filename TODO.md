@@ -51,9 +51,12 @@ Real deploy + e2e only viable *after* this fix PR merges + user performs the pla
 - [x] Make redirect host configurable / per-tool param — buildRedirectUri now respects UPWORK_REDIRECT_BASE or UPWORK_REDIRECT_HOST (env/secret). Updated header comments.
 - [ ] Add more resources (job templates, room stories, etc.)
 - [ ] Optional: background alerts / scheduled jobs per user (Agents workflows + email or webhooks)
-- [ ] Add unit tests for the token + graphql helpers (mocked fetch)
+- [x] Add unit tests for the token + graphql helpers (mocked fetch) — basic endpoint + callback + home coverage added (tests now pass; full mocked GraphQL/token helpers remain for future expansion per real usage).
 - [ ] After real usage, harvest the most useful queries and promote them to dedicated tools (beyond the raw escape hatch)
 - [ ] Consider adding a small UI page at /connect-upwork for users who have already authed the MCP side
+- [x] Added `npm run validate` script + scripts/validate.js (lint + types + placeholder guard) as production gate / plugin-source equivalent of make validate. Run before deploys.
+- [x] Further consent hardening (CSP headers on responses, Secure cookies, robust parser, CSRF clears) + extra resource (recent-proposals) + expanded production docs in README.
+- Note: real KV creation, Upwork callback registration, full E2E with keys, and advanced expansions (more mutations, signed cookies, per-tool redirect, background jobs, /connect-upwork page) are post-deploy user actions (see "Next natural actions" in history).
 
 ## Policy Reminders (from Claude.md / AGENTS.md)
 
