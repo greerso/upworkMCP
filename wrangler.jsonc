@@ -1,0 +1,38 @@
+{
+  "name": "upwork-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-06-01",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MyMCP",
+        "class_name": "UpworkMCP"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["UpworkMCP"]
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "UPWORK_TOKENS",
+      // Run `npx wrangler kv namespace create UPWORK_TOKENS` (and --preview) and replace these placeholder ids
+      "id": "00000000000000000000000000000000",
+      "preview_id": "00000000000000000000000000000000"
+    }
+  ],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

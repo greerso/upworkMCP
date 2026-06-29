@@ -1,0 +1,26 @@
+{
+	"name": "upwork-mcp",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Best-in-class, full-featured remote MCP server for the Upwork GraphQL API with OAuth2 support",
+	"scripts": {
+		"deploy": "wrangler deploy",
+		"dev": "wrangler dev",
+		"start": "wrangler dev",
+		"test": "vitest",
+		"cf-typegen": "wrangler types",
+		"lint": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"@cloudflare/vitest-pool-workers": "^0.12.4",
+		"typescript": "^5.5.2",
+		"vitest": "~3.2.0",
+		"wrangler": "^4.105.0"
+	},
+	"dependencies": {
+		"@cloudflare/workers-oauth-provider": "^0.8.1",
+		"@modelcontextprotocol/sdk": "^1.29.0",
+		"agents": "^0.17.1",
+		"zod": "^4.4.3"
+	}
+}
