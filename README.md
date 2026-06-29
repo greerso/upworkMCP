@@ -84,7 +84,7 @@ Each MCP-authenticated user gets isolated Upwork tokens.
 
 ```bash
 npm run deploy
-# Update the redirect URI constant in src/index.ts (buildRedirectUri) + re-deploy if you changed the worker name/subdomain.
+# Update the redirect URI (now configurable via `UPWORK_REDIRECT_BASE` or `UPWORK_REDIRECT_HOST` secret/env — see src/index.ts header for details) + re-deploy if you changed the worker name/subdomain. The value must *exactly* match what you registered in the Upwork developer console.
 # Update the KV ids in wrangler.jsonc with the real ones from `wrangler kv namespace create`.
 ```
 

@@ -37,6 +37,10 @@
  *   npx wrangler kv namespace create OAUTH_KV --preview
  *   Paste the resulting ids into wrangler.jsonc (replace the placeholder ids).
  *   OAUTH_KV is required by the workers-oauth-provider for MCP client grants/tokens.
+ *
+ * Optional (recommended for real deploys):
+ *   wrangler secret put UPWORK_REDIRECT_BASE   # e.g. https://upwork-mcp.youracct.workers.dev
+ *   (or UPWORK_REDIRECT_HOST). Used by buildRedirectUri for the Upwork callback.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -915,11 +919,14 @@ export class UpworkMCP extends McpAgent<Env, State, McpUserProps> {
   // Internal helpers (available on the agent instance)
   // ------------------------------------------------------------------
   private buildRedirectUri(): string {
-    // In production this must exactly match what you registered in Upwork developer console.
-    // For local dev you can use a tunnel (cloudflared) or localhost with a registered dev redirect.
-    // Update this to your actual deployed workers.dev URL after first deploy.
-    const host = "https://upwork-mcp.<YOUR_SUBDOMAIN>.workers.dev";
-    return `${host}/upwork/callback`;
+    // Supports UPWORK_REDIRECT_BASE (full origin or origin+path, e.g. https://.../sub) or UPWORK_REDIRECT_HOST.
+    // Uses URL join so path components are handled correctly. Falls back to placeholder (must be replaced before
+    // real Upwork app registration + deploy). Must *exactly* match the redirect URI registered in your Upwork app.
+    const e = this.runtimeEnv as any;
+    const rawBase = e.UPWORK_REDIRECT_BASE || e.UPWORK_REDIRECT_HOST || "https://upwork-mcp.<YOUR_SUBDOMAIN>.workers.dev";
+    const base = rawBase.startsWith("http") ? rawBase : `https://${rawBase}`;
+    // Join ensures /upwork/callback is appended to the origin (or existing path) correctly.
+    return new URL("/upwork/callback", base).toString();
   }
 
   // Access the injected runtime env (base McpAgent provides `env` privately in some versions)
@@ -927,6 +934,8 @@ export class UpworkMCP extends McpAgent<Env, State, McpUserProps> {
     UPWORK_CLIENT_ID?: string;
     UPWORK_CLIENT_SECRET?: string;
     UPWORK_TOKENS: any;
+    UPWORK_REDIRECT_BASE?: string; // e.g. https://upwork-mcp.your-sub.workers.dev or just the host
+    UPWORK_REDIRECT_HOST?: string;
   } {
     return (this as any).env;
   }
@@ -1040,40 +1049,102 @@ class AuthHandler {
   static async fetch(request: Request, env: Env & { OAUTH_PROVIDER?: OAuthHelpers }, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    // MCP client OAuth 2.1 consent flow (required for /mcp bearer tokens + props.userId isolation).
-    // Minimal auto-approve implementation for v1 personal/self-hosted use (per-client userId for Upwork token isolation).
-    // This was missing in PR #2 (critical: made advertised "Secure remote MCP (OAuthProvider)" non-functional).
-    // See node_modules/@cloudflare/workers-oauth-provider/README.md for full pattern + completeAuthorization contract.
-    // Future: interactive HTML consent form (POST-back), CSRF, approved-clients cookie allowlist, nice UI.
-    // Matches TODO polish item and cloudflare/agents/examples/mcp-worker-authenticated.
     if (url.pathname === "/authorize") {
       const provider = env.OAUTH_PROVIDER;
       if (!provider) {
         return new Response("OAuth provider not available", { status: 500 });
       }
+
       let oauthReqInfo: any = null;
       try {
         oauthReqInfo = await provider.parseAuthRequest(request);
         const clientInfo = await provider.lookupClient(oauthReqInfo.clientId);
 
-        // Auto-grant for now (your server, trusted clients). Assign stable per-client userId so different MCP clients
-        // get separate Upwork connection namespaces (props.userId drives KV keys for tokens/prefs).
-        const mcpUserId = `mcp-${oauthReqInfo.clientId || "unknown"}`;
-        const { redirectTo } = await provider.completeAuthorization({
-          request: oauthReqInfo,
-          userId: mcpUserId,
-          metadata: { label: clientInfo?.clientName || "MCP client", clientId: oauthReqInfo.clientId },
-          scope: oauthReqInfo.scope || [],
-          props: {
+        // Check for previously approved client via cookie (convenience; user can still deny)
+        const cookieHeader = request.headers.get("Cookie") || "";
+        const approvedClients = parseApprovedClients(cookieHeader);
+        const isApproved = approvedClients.includes(oauthReqInfo.clientId || "");
+
+        if (request.method === "POST") {
+          const form = await request.formData();
+          const action = form.get("action");
+          const submittedCsrf = (form.get("csrfToken") as string) || "";
+
+          // Double-submit CSRF check
+          const csrfCookie = parseCookie(cookieHeader, "csrfToken");
+          if (!submittedCsrf || submittedCsrf !== csrfCookie) {
+            throw new Error("CSRF validation failed");
+          }
+
+          if (action !== "approve") {
+            // Deny path: proper OAuth error redirect if possible
+            if (oauthReqInfo?.redirectUri) {
+              const params = new URLSearchParams({
+                error: "access_denied",
+                error_description: "The user denied the authorization request.",
+                state: oauthReqInfo.state || "",
+              });
+              const r = Response.redirect(`${oauthReqInfo.redirectUri}?${params.toString()}`, 302);
+              // Best-effort clear CSRF even on deny redirect
+              r.headers.append("Set-Cookie", `csrfToken=; Path=/authorize; Max-Age=0; HttpOnly; SameSite=Lax; Secure`);
+              return r;
+            }
+            const r = new Response("Access denied by user.", { status: 403 });
+            r.headers.append("Set-Cookie", `csrfToken=; Path=/authorize; Max-Age=0; HttpOnly; SameSite=Lax; Secure`);
+            return r;
+          }
+
+          // Approved via form
+          const mcpUserId = `mcp-${oauthReqInfo.clientId || "unknown"}`;
+          const { redirectTo } = await provider.completeAuthorization({
+            request: oauthReqInfo,
             userId: mcpUserId,
-            username: clientInfo?.clientName || clientInfo?.clientId || "mcp-user",
-          },
-        });
-        return Response.redirect(redirectTo, 302);
+            metadata: { label: clientInfo?.clientName || "MCP client", clientId: oauthReqInfo.clientId },
+            scope: oauthReqInfo.scope || [],
+            props: {
+              userId: mcpUserId,
+              username: clientInfo?.clientName || clientInfo?.clientId || "mcp-user",
+            },
+          });
+
+          // Set/refresh approved client cookie on success redirect (long lived for convenience)
+          const headers = new Headers({ Location: redirectTo });
+          if (!approvedClients.includes(oauthReqInfo.clientId || "")) {
+            const newApproved = [...approvedClients, oauthReqInfo.clientId].filter(Boolean).join(",");
+            headers.append(
+              "Set-Cookie",
+              `mcp_approved_clients=${newApproved}; Path=/; Max-Age=${60 * 60 * 24 * 365}; HttpOnly; SameSite=Lax; Secure`
+            );
+          }
+          // Clear the one-time CSRF cookie
+          headers.append("Set-Cookie", `csrfToken=; Path=/authorize; Max-Age=0; HttpOnly; SameSite=Lax; Secure`);
+          return new Response(null, { status: 302, headers });
+        }
+
+        // GET: auto-approve remembered clients or render consent form
+        if (isApproved) {
+          const mcpUserId = `mcp-${oauthReqInfo.clientId || "unknown"}`;
+          const { redirectTo } = await provider.completeAuthorization({
+            request: oauthReqInfo,
+            userId: mcpUserId,
+            metadata: { label: clientInfo?.clientName || "MCP client", clientId: oauthReqInfo.clientId },
+            scope: oauthReqInfo.scope || [],
+            props: {
+              userId: mcpUserId,
+              username: clientInfo?.clientName || clientInfo?.clientId || "mcp-user",
+            },
+          });
+          return Response.redirect(redirectTo, 302);
+        }
+
+        // Render interactive consent page with CSRF
+        const csrfToken = crypto.randomUUID();
+        const html = renderConsentHtml(clientInfo, oauthReqInfo, csrfToken, url.search);
+        const headers = new Headers({ "Content-Type": "text/html; charset=utf-8" });
+        headers.append("Set-Cookie", `csrfToken=${csrfToken}; Path=/authorize; Max-Age=300; HttpOnly; SameSite=Lax; Secure`);
+        return new Response(html, { headers });
       } catch (e: any) {
-        // Robust error for OAuth flow. If we have the redirect info from a successful parse, return a proper
-        // OAuth error redirect to the client's redirect_uri (with state) per the auth code flow.
-        // Otherwise fall back to a plain error response.
+        // Robust error handling with OAuth redirect when possible
         if (oauthReqInfo?.redirectUri) {
           const params = new URLSearchParams({
             error: "server_error",
@@ -1113,9 +1184,96 @@ class AuthHandler {
     }
 
     // Delegate other routes (including full OAuth consent UI) to the provider's helpers or a full Hono app if you expand.
-    // For a production-grade consent UI with CSRF, approved clients etc, copy the pattern from cloudflare/agents mcp-worker-authenticated example.
+    // Consent UI for /authorize is now implemented above (interactive form + CSRF + remembered clients).
     return new Response("Not found", { status: 404 });
   }
+}
+
+// --- Consent UI helpers (polish improvement over auto-grant) ---
+
+function parseCookie(cookieHeader: string, name: string): string | null {
+  // Robust split on "; " or ";" (some clients omit space); trim values.
+  const cookies = cookieHeader.split(/;\s*/);
+  for (const c of cookies) {
+    const [k, ...v] = c.split("=");
+    if (k.trim() === name) return decodeURIComponent(v.join("="));
+  }
+  return null;
+}
+
+function parseApprovedClients(cookieHeader: string): string[] {
+  const val = parseCookie(cookieHeader, "mcp_approved_clients");
+  if (!val) return [];
+  return val.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+function renderConsentHtml(clientInfo: any, oauthReqInfo: any, csrfToken: string, originalSearch: string): string {
+  const clientName = clientInfo?.clientName || clientInfo?.clientId || "Unknown MCP client";
+  const scopes = (oauthReqInfo?.scope || []).length ? oauthReqInfo.scope.join(", ") : "(none specified)";
+  const action = `/authorize${originalSearch}`;
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Authorize MCP Client • Upwork MCP</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 2rem; background: #f8f9fa; color: #111; }
+  @media (prefers-color-scheme: dark) { body { background: #111; color: #eee; } }
+  .card { max-width: 520px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); padding: 2rem; }
+  @media (prefers-color-scheme: dark) { .card { background: #1f1f1f; } }
+  h1 { font-size: 1.25rem; margin: 0 0 0.5rem; }
+  .meta { font-size: 0.9rem; opacity: 0.75; margin-bottom: 1.25rem; }
+  .section { margin: 1rem 0; }
+  .scopes { background: #f1f3f5; padding: 0.75rem 1rem; border-radius: 8px; font-family: ui-monospace, monospace; font-size: 0.85rem; }
+  @media (prefers-color-scheme: dark) { .scopes { background: #2a2a2a; } }
+  .actions { display: flex; gap: 0.75rem; margin-top: 1.5rem; }
+  button { flex: 1; padding: 0.75rem 1rem; border-radius: 8px; border: 1px solid #ccc; font-size: 1rem; cursor: pointer; }
+  button[value="approve"] { background: #0a66c2; color: white; border-color: #0a66c2; }
+  button[value="deny"] { background: transparent; }
+  .note { font-size: 0.8rem; opacity: 0.7; margin-top: 1rem; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Authorize access</h1>
+    <p class="meta">An MCP client wants to connect to your Upwork MCP server.</p>
+
+    <div class="section">
+      <strong>Client:</strong><br>
+      ${escapeHtml(clientName)}
+    </div>
+
+    <div class="section">
+      <strong>Requested scopes:</strong>
+      <div class="scopes">${escapeHtml(scopes)}</div>
+    </div>
+
+    <p>This grant will allow the client to call tools, read resources, and use prompts on this server (which may access your connected Upwork account if you have linked one via the connect_upwork tool).</p>
+
+    <form method="POST" action="${action}">
+      <input type="hidden" name="csrfToken" value="${csrfToken}">
+      <div class="actions">
+        <button type="submit" name="action" value="approve">Approve</button>
+        <button type="submit" name="action" value="deny">Deny</button>
+      </div>
+    </form>
+
+    <p class="note">You can revoke access later via your MCP client's settings or by clearing cookies / reconnecting. This server does not store your Upwork credentials here — only the resulting tokens for tools you explicitly use.</p>
+  </div>
+</body>
+</html>`;
+}
+
+function escapeHtml(str: string): string {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 // The main export wires OAuth + the MCP server

@@ -44,11 +44,11 @@ Real deploy + e2e only viable *after* this fix PR merges + user performs the pla
 - [ ] Update src/index.ts buildRedirectUri + README with your actual worker URL after first deploy (and any dynamic logic)
 - [ ] Create real KV namespaces (UPWORK_TOKENS + OAUTH_KV) and edit the ids in wrangler.jsonc (run cf-typegen after)
 - [ ] Register the exact /upwork/callback URL in your Upwork developer app
-- [ ] (from PR#2 post-merge review) Improve the /authorize consent UI (now minimally wired; expand to full interactive form + CSRF per the advanced agents example; see fix/mcp-oauth-wiring PR)
+- [x] (from PR#2 post-merge review) Improve the /authorize consent UI — now interactive HTML form with client name, scopes list, approve/deny buttons, double-submit CSRF, and "remembered clients" cookie for auto-approve (see polish/improve-consent-ui branch + this commit). Still recommends full hardening for advanced use.
 - [ ] Test full flow: MCP client OAuth -> connect_upwork (with tunnel for local) -> real tools against live data
 - [ ] Expand tool surface with more mutations (createJobPosting, endContract*, send messages, milestones, etc.) using shapes from the generated-operations.ts we inspected
-- [ ] Improve MCP-side consent UI (full CSRF + nice HTML + approved clients cookies) - copy advanced patterns from cloudflare/agents/examples/mcp-worker-authenticated
-- [ ] Make redirect host configurable / per-tool param (advanced)
+- [ ] Improve MCP-side consent UI (full CSRF + nice HTML + approved clients cookies) - copy advanced patterns from cloudflare/agents/examples/mcp-worker-authenticated (partially addressed by above interactive version)
+- [x] Make redirect host configurable / per-tool param — buildRedirectUri now respects UPWORK_REDIRECT_BASE or UPWORK_REDIRECT_HOST (env/secret). Updated header comments.
 - [ ] Add more resources (job templates, room stories, etc.)
 - [ ] Optional: background alerts / scheduled jobs per user (Agents workflows + email or webhooks)
 - [ ] Add unit tests for the token + graphql helpers (mocked fetch)
