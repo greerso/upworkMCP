@@ -2,5 +2,6 @@
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: no-referrer
-  # CSP for assets; adjust as needed (consent page has its own inline style).
-  Content-Security-Policy: default-src 'self'; frame-ancestors 'none';
+  # CSP for assets. style-src 'unsafe-inline' matches appendSecurityHeaders() in src/index.ts
+  # and public/index.html's inline body style attribute.
+  Content-Security-Policy: default-src 'self'; frame-ancestors 'none'; style-src 'unsafe-inline';

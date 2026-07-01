@@ -1,21 +1,21 @@
 # upwork-mcp
 
-**Best-in-class full-featured MCP server for the Upwork GraphQL API.**
+**Single-operator MCP server for the Upwork GraphQL API.**
 
-Built with the Cloudflare Agents SDK + McpAgent for a stateful, durable, production-ready remote MCP server.
+Built with the Cloudflare Agents SDK + McpAgent. Designed for one owner running their own Upwork account through it — see "Single-owner model" below before deploying for anyone else.
 
 ## Features
 
-- **20+ high-level tools** for jobs (search + details), contracts, offers, milestones, proposals, messaging (rooms/stories), profiles, talent search, organizations, time reports, ontology (skills/categories), work diary, transactions, etc.
-- **Power tool**: `execute_upwork_graphql` for any custom query/mutation with safety elicitation on writes.
-- **Resources**: `upwork://me/profile`, `upwork://me/contracts` (and easily extendable).
+- **17 high-level tools** for jobs (search + details), contracts, offers, proposals (read-only — Upwork's API has no submit/withdraw mutation, see Limitations), messaging (rooms/stories), profiles, talent search, organizations, ontology (skills). No time-report, work-diary, transaction, portfolio, or milestone-mutation tools exist — Upwork's API doesn't expose those either (verified against the live docs; see Limitations).
+- **Power tool**: `execute_upwork_graphql` for any custom query/mutation. Mutations always require an interactive elicitation confirmation — there is no way for a tool caller to skip it.
+- **Resources**: `upwork://me/profile`, `upwork://me/contracts`, `upwork://me/proposals`.
 - **Prompts**: `draft_proposal`, `analyze_contract` (Claude can auto-load data + write guided output).
 - **Elicitation**: Interactive confirmation for high-stakes actions (create offer, raw mutations).
-- **Full OAuth2 for Upwork**: `connect_upwork` / disconnect, auto token refresh, per-MCP-user storage.
+- **Full OAuth2 for Upwork**: `connect_upwork` / disconnect, auto token refresh (only clears stored tokens on a definitive 400/401 auth failure, not on transient errors).
 - **Organization / Tenant support**: `list_organizations` + `set_default_tenant` (sends correct `X-Upwork-API-TenantId`).
-- **Secure by default**: MCP clients must complete OAuth 2.1 flow against the server (via workers-oauth-provider) before calling tools. `props` carry user identity.
+- **Secure by default**: MCP clients must complete OAuth 2.1 flow (via workers-oauth-provider) before calling tools, AND the human must enter the `OWNER_PASSWORD` on the consent screen — see "Single-owner model".
 - **Stateful + durable**: Built on Durable Objects + SQLite (via McpAgent). KV for tokens/prefs (easy to swap).
-- Rate-limit aware (300/min per IP documented by Upwork), friendly errors, ToS note about caching (≤24h).
+- Basic rate limiting on failed owner-password attempts (8 per 10 min per IP); friendly errors; ToS note about caching (≤24h).
 
 ## Quick Start (Local)
 
@@ -61,9 +61,21 @@ Then `npm run dev` (local KV works automatically) or `npm run deploy`.
 
 Remote MCP servers are connected via URL + the OAuth flow exposed by this server (`/authorize`, `/token`, `/register`).
 
-After the MCP client has a valid token for this server, call the `connect_upwork` tool inside a conversation. It returns a link — open it, log into Upwork, authorize the scopes, and you'll be redirected to a success page. Then Upwork tools light up for that user.
+After the MCP client has a valid token for this server, call the `connect_upwork` tool inside a conversation. It returns a link — open it, log into Upwork, authorize the scopes, and you'll be redirected to a success page. Then Upwork tools light up.
 
-Each MCP-authenticated user gets isolated Upwork tokens.
+## Single-owner model (read before deploying)
+
+This server does **not** isolate Upwork tokens per human user. Upwork tokens are keyed by the MCP client's registered `clientId`, so any two people who complete OAuth using the same registered MCP client would share one Upwork account's tokens. That's fine for the intended use case — one operator, running their own Upwork account through their own MCP clients (Claude Code, Cursor, etc.) — and is not fine for a multi-tenant deployment.
+
+Because `/authorize` has no per-user login of its own, the **only** thing stopping a random visitor from completing OAuth and getting a token issued is the `OWNER_PASSWORD` secret, entered on the consent screen. Deploying without it set is refused (fail closed — see AuthHandler). Set it before your first deploy:
+
+```bash
+npx wrangler secret put OWNER_PASSWORD
+```
+
+Failed password attempts are rate-limited (8 per 10 minutes per IP, tracked in the `UPWORK_TOKENS` KV) to blunt brute-forcing. Once you approve a client once, a long-lived `mcp_approved_clients` cookie skips the password prompt on that browser going forward — treat that cookie like a credential.
+
+If you need real multi-user isolation later, that requires adding actual per-user authentication in front of `completeAuthorization` and keying Upwork tokens by authenticated user identity instead of `clientId` — not implemented here.
 
 ## Architecture Notes
 
@@ -75,21 +87,24 @@ Each MCP-authenticated user gets isolated Upwork tokens.
 
 ## Production Readiness Notes
 
-- **Consent UI**: `/authorize` now serves an interactive approval page (client name, scopes, CSRF-protected form, remembered clients via cookie for convenience). See source for details; copy advanced patterns from cloudflare/agents for full CSP/signed cookies in multi-tenant scenarios.
-- **Security headers**: Basic CSP, X-Frame-Options, etc. are set on /authorize consent form and 404 responses (via shared helper). Home page is primarily served via ASSETS binding (public/index.html; enhance via wrangler.jsonc [headers] or CF WAF/middleware per code comments). /upwork/callback and error paths now also get them for consistency. See src for appendSecurityHeaders and wrangler for static headers example.
-- **Config**: Use `UPWORK_REDIRECT_BASE` secret for the Upwork callback. Always use real KV namespaces (OAUTH_KV + UPWORK_TOKENS) — see `npm run validate`.
-- **Dev for consent UI + cookies**: The new interactive /authorize + remembered clients use Secure cookies. Standard `wrangler dev` (http) will not set/send them (browser policy), so no auto-approve and CSRF checks may fail on POST. Use https tunnel (cloudflared/ngrok) for full local OAuth + consent testing, or test the form UI in http (it still renders and submits; errors surface gracefully). Prod (workers.dev https) is unaffected.
-- **Rate limits & ToS**: Upwork ~300 req/min per IP; respect caching rules (≤24h). No spam paths exposed.
+- **Consent UI + owner password**: `/authorize` serves an interactive approval page (client name, scopes, CSRF-protected form, owner-password field, remembered clients via cookie for convenience). Requests are refused (500, fail closed) if `OWNER_PASSWORD` isn't set. See "Single-owner model" above.
+- **Security headers**: Basic CSP, X-Frame-Options, etc. are set on /authorize consent form, 404s, and /upwork/callback (via shared `appendSecurityHeaders` helper). Static assets get the matching CSP from `public/_headers`.
+- **Config**: Use `UPWORK_REDIRECT_BASE` secret for the Upwork callback — `connect_upwork` now refuses to proceed (with a clear error) if this isn't set, instead of generating a broken redirect URI. Always use real KV namespaces (OAUTH_KV + UPWORK_TOKENS) — see `npm run validate`.
+- **Dev for consent UI + cookies**: The interactive /authorize + remembered clients use Secure cookies. Standard `wrangler dev` (http) will not set/send them (browser policy), so no auto-approve and CSRF checks may fail on POST. Use an https tunnel (cloudflared/ngrok) for full local OAuth + consent testing. Prod (workers.dev https) is unaffected.
+- **Token refresh resilience**: A transient Upwork 5xx/network error during refresh no longer forces a full re-auth — stored tokens are only cleared on a definitive 400/401 (revoked/expired refresh_token). See `UpworkAuthError` in src/index.ts.
+- **Rate limits & ToS**: Upwork ~300 req/min per IP; respect caching rules (≤24h). Failed owner-password attempts are separately rate-limited (see "Single-owner model").
 - **Monitoring**: Enable observability in wrangler.jsonc; use `wrangler tail` or dashboards for errors/token refreshes.
 - **Secrets & KV**: Never commit real ids or keys. Rotate tokens by disconnect + re-connect.
+- **Not yet verified against the live API**: every Upwork GraphQL operation in this codebase (field/argument names) was authored from docs and community references, not run against a live Upwork account. Test the full flow — MCP OAuth → `connect_upwork` → each tool — with real Upwork developer keys before trusting the output. This is the biggest remaining gap; see TODO.md.
 - After deploy: run `npm run validate`, register exact callback in Upwork app, test full OAuth + tools E2E with real keys.
 
-## Limitations (Upwork side)
+## Limitations (Upwork side, confirmed against the live docs)
 
-- The public GraphQL API is read-heavy for many freelancer actions.
-- Submitting proposals (spending Connects) and certain write actions that Upwork wants to rate-limit are either missing from the schema or intentionally restricted ("coming soon" scopes exist).
-- You cannot (and should not) use this to spam applications.
+- **No proposal submission/withdrawal mutation exists.** Checked `#group-Types-Proposals` and the full mutations index at developers.upwork.com directly: only read queries exist (`vendorProposal(s)`, `clientProposal(s)`, `clientInvitation(s)`, `proposalMetadata`). This is deliberate on Upwork's part — write operations that spend Connects stay UI-only to prevent bid-spam automation. Not something this codebase can add.
+- **No portfolio type, query, or mutation exists anywhere in the schema.** Portfolio management is UI-only on Upwork's side.
+- **Connects balance/spend/purchase is not exposed via the API at all.**
 - Caching policy: Upwork ToS prohibits caching data > 24 hours in most cases.
+- You cannot (and should not) use this to spam applications.
 
 See "Production Readiness Notes" above for security, consent, and deploy hardening.
 
@@ -104,7 +119,9 @@ npm run deploy
 ## Environment / Secrets
 
 - `UPWORK_CLIENT_ID`, `UPWORK_CLIENT_SECRET` (wrangler secrets)
-- `UPWORK_TOKENS` KV binding
+- `OWNER_PASSWORD` (wrangler secret, **required** — see "Single-owner model")
+- `UPWORK_REDIRECT_BASE` or `UPWORK_REDIRECT_HOST` (wrangler secret, recommended — required before `connect_upwork` will work)
+- `UPWORK_TOKENS`, `OAUTH_KV` KV bindings
 
 ## Development Tips
 

@@ -39,6 +39,19 @@
 
 Real deploy + e2e only viable *after* this fix PR merges + user performs the placeholder replacements + exact callback registration + live Upwork keys test (see Next section).
 
+## Critical-assessment findings addressed on polish/improve-consent-ui (2026-07-01)
+
+Ran a full adversarial critical-assessment ("is our MCP production ready?"). Verdict: not yet — biggest gap is the live-API E2E below, which needs real Upwork keys the assistant doesn't have. Everything fixable without those keys is done:
+
+- [x] **[user decision] Single-user token isolation was false as documented.** Tokens are keyed by MCP `clientId`, not per-user, and `/authorize` had no owner authentication at all — any visitor could complete OAuth and get a token issued. User confirmed: single-owner model is correct, but needs a gate so the public can't use it. Added `OWNER_PASSWORD` secret required on the consent form (fail-closed if unset), with KV-backed rate limiting on failed attempts (8/10min per IP). README now documents this honestly under "Single-owner model" instead of claiming per-user isolation.
+- [x] **[implementer] README/header-comment overstated tool count and features.** Claimed "20+ tools" and listed time reports/work diary/transactions/milestones as tool categories — actual count is 17, and none of those categories have tools (Upwork's API doesn't expose them either, confirmed against live docs). Corrected in README, package.json, public/index.html, and the src/index.ts header comment.
+- [x] **[implementer] "Unit tests for token + graphql helpers" was checked off but didn't exist.** Added real mocked-fetch tests for exchangeUpworkCode, refreshUpworkToken, callUpworkGraphQL, parseCookie/parseApprovedClients, isGraphqlMutation (20 tests, all pass).
+- [x] **[implementer] Mutation confirmation in execute_upwork_graphql was bypassable.** Removed the caller-supplied `confirm` boolean (an LLM could just set it true) — mutations now always require the interactive elicitInput round-trip. Also hardened mutation detection to strip leading `#`-comment lines before checking for the `mutation` keyword.
+- [x] **[implementer] Token refresh was too aggressive and under-validated.** `ensureFreshUpworkToken` cleared stored tokens on *any* refresh error, forcing full re-auth on a transient 5xx. Added `UpworkAuthError` (carries HTTP status) so tokens are only cleared on a definitive 400/401; also validates `access_token` is present after refresh instead of silently storing `undefined`.
+- [x] **[implementer] buildRedirectUri silently fell back to a `<YOUR_SUBDOMAIN>` placeholder.** `connect_upwork` now checks for the placeholder and returns a clear "set UPWORK_REDIRECT_BASE" error instead of generating a broken auth URL.
+- [x] **[improvement] CSP mismatch** — `public/_headers` was missing `style-src 'unsafe-inline'` that `appendSecurityHeaders()` sets, so the static page's own inline body style was blocked by its own CSP. Aligned.
+- [ ] **Blocker not addressed — needs live Upwork keys**: every Upwork GraphQL operation in this codebase is unverified against the live API (field/argument names authored from docs, never run). This requires the operator to register an Upwork dev app and run the full connect_upwork → tools flow with real keys. See "Test full flow" item below.
+
 ## Next / Polish (post-merge)
 
 - [ ] Update src/index.ts buildRedirectUri + README with your actual worker URL after first deploy (and any dynamic logic)
@@ -51,7 +64,7 @@ Real deploy + e2e only viable *after* this fix PR merges + user performs the pla
 - [x] Make redirect host configurable / per-tool param — buildRedirectUri now respects UPWORK_REDIRECT_BASE or UPWORK_REDIRECT_HOST (env/secret). Updated header comments.
 - [ ] Add more resources (job templates, room stories, etc.)
 - [ ] Optional: background alerts / scheduled jobs per user (Agents workflows + email or webhooks)
-- [x] Add unit tests for the token + graphql helpers (mocked fetch) — basic endpoint + callback + home coverage added (tests now pass; full mocked GraphQL/token helpers remain for future expansion per real usage).
+- [x] Add unit tests for the token + graphql helpers (mocked fetch) — real coverage now: exchangeUpworkCode, refreshUpworkToken (incl. UpworkAuthError status on 400/401), callUpworkGraphQL, parseCookie/parseApprovedClients, isGraphqlMutation. 20 tests total, all pass. `/authorize` flow (consent form + owner password + CSRF) still requires a real deploy to exercise end to end.
 - [ ] After real usage, harvest the most useful queries and promote them to dedicated tools (beyond the raw escape hatch)
 - [ ] Consider adding a small UI page at /connect-upwork for users who have already authed the MCP side
 - [x] Added `npm run validate` script + scripts/validate.js (lint + types + placeholder guard) as production gate / plugin-source equivalent of make validate. Run before deploys.

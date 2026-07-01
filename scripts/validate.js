@@ -79,6 +79,9 @@ if (!pkg.scripts.validate) {
   warn('No "validate" script in package.json (this script itself).');
 }
 
+// 7. Reminder for secrets that can't be checked from the repo (not present in source at all).
+warn('Cannot verify from source: OWNER_PASSWORD must be set via `npx wrangler secret put OWNER_PASSWORD` before deploy. /authorize refuses all requests (fail closed) without it — see README "Single-owner model".');
+
 if (errors > 0) {
   console.error(`\n❌ Validate failed with ${errors} error(s). Fix above before considering production-ready.`);
   process.exit(1);
