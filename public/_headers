@@ -1,0 +1,6 @@
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: no-referrer
+  # CSP for assets; adjust as needed (consent page has its own inline style).
+  Content-Security-Policy: default-src 'self'; frame-ancestors 'none';

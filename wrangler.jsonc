@@ -43,4 +43,6 @@
   "observability": {
     "enabled": true
   }
+  // Production security headers for assets: use public/_headers (or wrangler [headers] in supported versions).
+  // Dynamic responses use appendSecurityHeaders() helper in src/index.ts (consent, home, callbacks, errors).
 }

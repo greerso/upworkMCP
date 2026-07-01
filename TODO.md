@@ -44,16 +44,19 @@ Real deploy + e2e only viable *after* this fix PR merges + user performs the pla
 - [ ] Update src/index.ts buildRedirectUri + README with your actual worker URL after first deploy (and any dynamic logic)
 - [ ] Create real KV namespaces (UPWORK_TOKENS + OAUTH_KV) and edit the ids in wrangler.jsonc (run cf-typegen after)
 - [ ] Register the exact /upwork/callback URL in your Upwork developer app
-- [ ] (from PR#2 post-merge review) Improve the /authorize consent UI (now minimally wired; expand to full interactive form + CSRF per the advanced agents example; see fix/mcp-oauth-wiring PR)
+- [x] (from PR#2 post-merge review) Improve the /authorize consent UI — now interactive HTML form with client name, scopes list, approve/deny buttons, double-submit CSRF, and "remembered clients" cookie for auto-approve (see polish/improve-consent-ui branch + PR #6). Critical-assessment addressed parser/CSRF-clear/Secure/redirect-join issues pre-merge. Still recommends full hardening (CSP, signed cookies, etc.) for advanced use per agents examples.
 - [ ] Test full flow: MCP client OAuth -> connect_upwork (with tunnel for local) -> real tools against live data
 - [ ] Expand tool surface with more mutations (createJobPosting, endContract*, send messages, milestones, etc.) using shapes from the generated-operations.ts we inspected
-- [ ] Improve MCP-side consent UI (full CSRF + nice HTML + approved clients cookies) - copy advanced patterns from cloudflare/agents/examples/mcp-worker-authenticated
-- [ ] Make redirect host configurable / per-tool param (advanced)
+- [ ] Improve MCP-side consent UI (full CSRF + nice HTML + approved clients cookies) - copy advanced patterns from cloudflare/agents/examples/mcp-worker-authenticated (partially addressed by above interactive version)
+- [x] Make redirect host configurable / per-tool param — buildRedirectUri now respects UPWORK_REDIRECT_BASE or UPWORK_REDIRECT_HOST (env/secret). Updated header comments.
 - [ ] Add more resources (job templates, room stories, etc.)
 - [ ] Optional: background alerts / scheduled jobs per user (Agents workflows + email or webhooks)
-- [ ] Add unit tests for the token + graphql helpers (mocked fetch)
+- [x] Add unit tests for the token + graphql helpers (mocked fetch) — basic endpoint + callback + home coverage added (tests now pass; full mocked GraphQL/token helpers remain for future expansion per real usage).
 - [ ] After real usage, harvest the most useful queries and promote them to dedicated tools (beyond the raw escape hatch)
 - [ ] Consider adding a small UI page at /connect-upwork for users who have already authed the MCP side
+- [x] Added `npm run validate` script + scripts/validate.js (lint + types + placeholder guard) as production gate / plugin-source equivalent of make validate. Run before deploys.
+- [x] Further consent hardening (CSP headers on responses, Secure cookies, robust parser, CSRF clears) + extra resource (recent-proposals) + expanded production docs in README.
+- Note: real KV creation, Upwork callback registration, full E2E with keys, and advanced expansions (more mutations, signed cookies, per-tool redirect, background jobs, /connect-upwork page) are post-deploy user actions (see "Next natural actions" in history).
 
 ## Policy Reminders (from Claude.md / AGENTS.md)
 

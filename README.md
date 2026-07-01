@@ -73,6 +73,17 @@ Each MCP-authenticated user gets isolated Upwork tokens.
 - All GraphQL calls go through a small helper that injects Bearer + optional X-Upwork-API-TenantId and does transparent refresh.
 - Temp OAuth states for the Upwork leg also live in KV (short TTL).
 
+## Production Readiness Notes
+
+- **Consent UI**: `/authorize` now serves an interactive approval page (client name, scopes, CSRF-protected form, remembered clients via cookie for convenience). See source for details; copy advanced patterns from cloudflare/agents for full CSP/signed cookies in multi-tenant scenarios.
+- **Security headers**: Basic CSP, X-Frame-Options, etc. are set on /authorize consent form and 404 responses (via shared helper). Home page is primarily served via ASSETS binding (public/index.html; enhance via wrangler.jsonc [headers] or CF WAF/middleware per code comments). /upwork/callback and error paths now also get them for consistency. See src for appendSecurityHeaders and wrangler for static headers example.
+- **Config**: Use `UPWORK_REDIRECT_BASE` secret for the Upwork callback. Always use real KV namespaces (OAUTH_KV + UPWORK_TOKENS) — see `npm run validate`.
+- **Dev for consent UI + cookies**: The new interactive /authorize + remembered clients use Secure cookies. Standard `wrangler dev` (http) will not set/send them (browser policy), so no auto-approve and CSRF checks may fail on POST. Use https tunnel (cloudflared/ngrok) for full local OAuth + consent testing, or test the form UI in http (it still renders and submits; errors surface gracefully). Prod (workers.dev https) is unaffected.
+- **Rate limits & ToS**: Upwork ~300 req/min per IP; respect caching rules (≤24h). No spam paths exposed.
+- **Monitoring**: Enable observability in wrangler.jsonc; use `wrangler tail` or dashboards for errors/token refreshes.
+- **Secrets & KV**: Never commit real ids or keys. Rotate tokens by disconnect + re-connect.
+- After deploy: run `npm run validate`, register exact callback in Upwork app, test full OAuth + tools E2E with real keys.
+
 ## Limitations (Upwork side)
 
 - The public GraphQL API is read-heavy for many freelancer actions.
@@ -80,11 +91,13 @@ Each MCP-authenticated user gets isolated Upwork tokens.
 - You cannot (and should not) use this to spam applications.
 - Caching policy: Upwork ToS prohibits caching data > 24 hours in most cases.
 
+See "Production Readiness Notes" above for security, consent, and deploy hardening.
+
 ## Deploy
 
 ```bash
 npm run deploy
-# Update the redirect URI constant in src/index.ts (buildRedirectUri) + re-deploy if you changed the worker name/subdomain.
+# Update the redirect URI (now configurable via `UPWORK_REDIRECT_BASE` or `UPWORK_REDIRECT_HOST` secret/env — see src/index.ts header for details) + re-deploy if you changed the worker name/subdomain. The value must *exactly* match what you registered in the Upwork developer console.
 # Update the KV ids in wrangler.jsonc with the real ones from `wrangler kv namespace create`.
 ```
 
@@ -106,15 +119,21 @@ Unofficial. Not affiliated with Upwork. Comply with Upwork's API Terms of Use (h
 
 Built following the Cloudflare "build-mcp" skill / Agents SDK patterns for remote MCP servers.
 
-## Next Steps / Polish Ideas
+## Next Steps / Polish Ideas (post current polish)
 
-- Dynamic redirect URI (derive from the original request that triggered connect, or a user setting).
-- Richer structured content responses (instead of just text JSON dumps).
-- Background scheduled jobs per user (e.g. new job alerts via workflows + push/email).
-- Better consent UI for the MCP OAuth leg (copy advanced patterns from agents examples + add CSRF/approved clients).
-- Optional D1 or SQLite user prefs instead of KV for everything.
+Many items require real deploy + Upwork keys + E2E (see TODO.md "Next / Polish"):
 
-PRs welcome.
+- Real KV namespaces (UPWORK_TOKENS + OAUTH_KV) + edit ids + Upwork app callback registration + approval.
+- Full E2E test of MCP client OAuth (new interactive consent) + connect_upwork + live tools + refresh + isolation + elicitation.
+- Expand tool surface with more mutations (using shapes from community generators).
+- Add unit tests for helpers (mocked fetch; basic endpoint tests added).
+- More resources/prompts (recent-proposals added; job templates, stories, etc.).
+- Advanced consent (full CSP/signed cookies per agents mcp-worker-authenticated; current is interactive+CSRF+remembered for v1 self-hosted).
+- Background jobs, /connect-upwork UI page, per-tool redirect (advanced), harvest common queries to dedicated tools.
+
+Run `npm run validate` as a pre-deploy gate. PRs welcome for the rest.
+
+See README "Production Readiness Notes" and TODO for current status.
 
 ---
 
