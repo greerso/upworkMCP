@@ -2,7 +2,7 @@
 	"name": "upwork-mcp",
 	"version": "0.1.0",
 	"private": true,
-	"description": "Best-in-class, full-featured remote MCP server for the Upwork GraphQL API with OAuth2 support",
+	"description": "Single-operator remote MCP server for the Upwork GraphQL API with OAuth2 support",
 	"scripts": {
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",

@@ -1,17 +1,21 @@
 /**
  * Upwork MCP Server
  *
- * Best-in-class, full-featured remote MCP server for the Upwork GraphQL API.
+ * Single-operator remote MCP server for the Upwork GraphQL API.
  * - Built with Cloudflare McpAgent + Durable Objects for stateful sessions + per-user SQL cache
- * - Secured with @cloudflare/workers-oauth-provider (OAuth 2.1 for MCP clients)
- * - Full Upwork OAuth2 (authorization code + refresh) with per-MCP-user token storage in KV
- * - 20+ high-level tools covering jobs, contracts, offers, proposals, messaging, profiles, orgs, time tracking, ontology
- * - Power-user raw GraphQL execution tool
- * - Resources for profile/contracts/jobs
+ * - Secured with @cloudflare/workers-oauth-provider (OAuth 2.1 for MCP clients) PLUS an
+ *   OWNER_PASSWORD gate on /authorize — this server has no per-user auth, so the password
+ *   is what stops a random visitor from getting a token issued (see README "Single-owner model").
+ * - Full Upwork OAuth2 (authorization code + refresh) with token storage in KV
+ * - 17 high-level tools covering jobs, contracts, offers, proposals (read-only — see README
+ *   Limitations), messaging, profiles, orgs, ontology (Upwork's API does not expose proposal
+ *   submission, portfolio, time reports, work diary, or transactions — see README)
+ * - Power-user raw GraphQL execution tool (mutations always require interactive elicitation)
+ * - Resources for profile/contracts/proposals
  * - Prompts for common workflows (proposal drafting, contract review, job matching)
- * - Elicitation for high-stakes mutations (confirm before offers/contracts)
+ * - Elicitation for high-stakes mutations (confirm before offers/contracts/raw mutations)
  * - Automatic tenant/org header handling + companySelector helper
- * - Token auto-refresh, friendly error mapping, basic rate limit awareness
+ * - Token auto-refresh (only clears stored tokens on a definitive 400/401 auth failure)
  *
  * Usage:
  *   wrangler dev
@@ -29,6 +33,10 @@
  *   - Put CLIENT_ID and CLIENT_SECRET into wrangler secrets:
  *       npx wrangler secret put UPWORK_CLIENT_ID
  *       npx wrangler secret put UPWORK_CLIENT_SECRET
+ *
+ * REQUIRED — owner password (this server has no per-user auth; the password is the only
+ * thing stopping a random visitor from completing /authorize and getting a token issued):
+ *       npx wrangler secret put OWNER_PASSWORD
  *
  * KV setup (one-time):
  *   npx wrangler kv namespace create UPWORK_TOKENS
@@ -108,11 +116,18 @@ const DEFAULT_UPWORK_SCOPES = [
   "pub-snapshots:read:all",
 ].join(" ");
 
+// Detects a GraphQL mutation document robustly: strips leading `#`-comment lines/whitespace
+// first, so a document like "# some note\nmutation { ... }" isn't misread as a query.
+export function isGraphqlMutation(query: string): boolean {
+  const stripped = query.replace(/^\s*(#[^\n]*\n\s*)*/, "");
+  return /^mutation\b/i.test(stripped);
+}
+
 // ============================================================================
 // Upwork GraphQL Helper (with auth + tenant + refresh)
 // ============================================================================
 
-async function exchangeUpworkCode(
+export async function exchangeUpworkCode(
   code: string,
   redirectUri: string,
   clientId: string,
@@ -152,7 +167,17 @@ async function exchangeUpworkCode(
   };
 }
 
-async function refreshUpworkToken(
+// Thrown by refreshUpworkToken so callers can tell a definitive auth failure (401/400,
+// e.g. revoked/expired refresh_token) apart from a transient outage (5xx/network).
+export class UpworkAuthError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+export async function refreshUpworkToken(
   refreshToken: string,
   clientId: string,
   clientSecret: string
@@ -172,10 +197,13 @@ async function refreshUpworkToken(
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Upwork token refresh failed: ${res.status} ${text}`);
+    throw new UpworkAuthError(`Upwork token refresh failed: ${res.status} ${text}`, res.status);
   }
 
   const json: any = await res.json();
+  if (!json.access_token) {
+    throw new UpworkAuthError("No access_token in Upwork refresh response", res.status);
+  }
   return {
     access_token: json.access_token,
     refresh_token: json.refresh_token || refreshToken,
@@ -185,7 +213,7 @@ async function refreshUpworkToken(
   };
 }
 
-async function callUpworkGraphQL(
+export async function callUpworkGraphQL(
   query: string,
   variables: Record<string, unknown> = {},
   env: Env,
@@ -315,6 +343,19 @@ export class UpworkMCP extends McpAgent<Env, State, McpUserProps> {
               {
                 type: "text",
                 text: "Server misconfigured: UPWORK_CLIENT_ID secret not set. Ask the operator to configure it.",
+              },
+            ],
+          };
+        }
+
+        if (redirectUri.includes("<YOUR_SUBDOMAIN>")) {
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  "Server misconfigured: UPWORK_REDIRECT_BASE (or UPWORK_REDIRECT_HOST) secret not set. " +
+                  "Ask the operator to configure it — Upwork will reject the placeholder redirect URI.",
               },
             ],
           };
@@ -778,16 +819,18 @@ export class UpworkMCP extends McpAgent<Env, State, McpUserProps> {
           query: z.string().describe("The full GraphQL document (query or mutation)"),
           variables: z.record(z.string(), z.unknown()).optional(),
           tenantId: z.string().optional(),
-          confirm: z.boolean().optional(),
         },
       },
-      async ({ query, variables = {}, tenantId, confirm }) => {
-        const isMutation = /^\s*mutation/i.test(query);
+      async ({ query, variables = {}, tenantId }) => {
+        const isMutation = isGraphqlMutation(query);
         const tokens = await this.ensureFreshUpworkToken();
         const prefs = await this.getUserPrefs();
         const effectiveTenant = tenantId || prefs?.defaultTenantId;
 
-        if (isMutation && !confirm) {
+        // Mutations always require a genuine interactive confirmation round-trip via elicitInput —
+        // there's deliberately no caller-supplied "confirm" flag, since the caller is the LLM itself
+        // and could just set it to true, defeating the human-in-the-loop safety check.
+        if (isMutation) {
           const c = await this.server.server.elicitInput(
           {
             message: "This is a GraphQL MUTATION that may change data on Upwork. Confirm execution?",
@@ -972,7 +1015,13 @@ export class UpworkMCP extends McpAgent<Env, State, McpUserProps> {
           tokens = await refreshUpworkToken(tokens.refresh_token, clientId, clientSecret);
           await saveUpworkTokens(e.UPWORK_TOKENS, this.userId, tokens);
         } catch (refreshErr) {
-          await clearUpworkTokens(e.UPWORK_TOKENS, this.userId);
+          // Only wipe stored tokens on a definitive auth failure (revoked/expired refresh_token).
+          // A transient 5xx/network error shouldn't force a full re-auth — leave tokens in place
+          // so the next call can retry the refresh once Upwork recovers.
+          const status = refreshErr instanceof UpworkAuthError ? refreshErr.status : 0;
+          if (status === 400 || status === 401) {
+            await clearUpworkTokens(e.UPWORK_TOKENS, this.userId);
+          }
           return null;
         }
       }
@@ -1082,6 +1131,19 @@ class AuthHandler {
         return new Response("OAuth provider not available", { status: 500 });
       }
 
+      // This server is meant for a single owner. Without an OWNER_PASSWORD secret configured,
+      // /authorize would grant access to anyone who reaches the URL — fail closed instead.
+      const ownerPassword = (env as any).OWNER_PASSWORD as string | undefined;
+      if (!ownerPassword) {
+        const r = new Response(
+          "Server misconfigured: OWNER_PASSWORD secret not set. Refusing to authorize (fail closed). " +
+            "Run `npx wrangler secret put OWNER_PASSWORD` and redeploy.",
+          { status: 500 }
+        );
+        appendSecurityHeaders(r);
+        return r;
+      }
+
       let oauthReqInfo: any = null;
       try {
         oauthReqInfo = await provider.parseAuthRequest(request);
@@ -1101,6 +1163,23 @@ class AuthHandler {
           const csrfCookie = parseCookie(cookieHeader, "csrfToken");
           if (!submittedCsrf || submittedCsrf !== csrfCookie) {
             throw new Error("CSRF validation failed");
+          }
+
+          if (action === "approve") {
+            const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+            if (await isOwnerPasswordRateLimited(env.UPWORK_TOKENS, ip)) {
+              const r = new Response("Too many failed attempts. Try again in a few minutes.", { status: 429 });
+              appendSecurityHeaders(r);
+              return r;
+            }
+            const submittedPassword = (form.get("ownerPassword") as string) || "";
+            if (submittedPassword !== ownerPassword) {
+              await recordOwnerPasswordFailure(env.UPWORK_TOKENS, ip);
+              const r = new Response("Incorrect owner password. Go back and try again.", { status: 403 });
+              r.headers.append("Set-Cookie", `csrfToken=; Path=/authorize; Max-Age=0; HttpOnly; SameSite=Lax; Secure`);
+              appendSecurityHeaders(r);
+              return r;
+            }
           }
 
           if (action !== "approve") {
@@ -1232,7 +1311,7 @@ function appendSecurityHeaders(target: Response | { headers: Headers }) {
 
 // --- Consent UI helpers (polish improvement over auto-grant) ---
 
-function parseCookie(cookieHeader: string, name: string): string | null {
+export function parseCookie(cookieHeader: string, name: string): string | null {
   // Robust split on "; " or ";" (some clients omit space); trim values.
   const cookies = cookieHeader.split(/;\s*/);
   for (const c of cookies) {
@@ -1242,10 +1321,27 @@ function parseCookie(cookieHeader: string, name: string): string | null {
   return null;
 }
 
-function parseApprovedClients(cookieHeader: string): string[] {
+export function parseApprovedClients(cookieHeader: string): string[] {
   const val = parseCookie(cookieHeader, "mcp_approved_clients");
   if (!val) return [];
   return val.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+const AUTH_FAIL_LIMIT = 8;
+const AUTH_FAIL_WINDOW_SECONDS = 600; // 10 min
+
+// ponytail: plain KV counter, not atomic under concurrent requests — fine as a brute-force
+// deterrent on a single-operator server, not a bank vault. Reuses the existing UPWORK_TOKENS KV.
+async function isOwnerPasswordRateLimited(kv: any, ip: string): Promise<boolean> {
+  const raw = await kv.get(`authfail:${ip}`);
+  return (raw ? parseInt(raw, 10) : 0) >= AUTH_FAIL_LIMIT;
+}
+
+async function recordOwnerPasswordFailure(kv: any, ip: string): Promise<void> {
+  const key = `authfail:${ip}`;
+  const raw = await kv.get(key);
+  const count = (raw ? parseInt(raw, 10) : 0) + 1;
+  await kv.put(key, String(count), { expirationTtl: AUTH_FAIL_WINDOW_SECONDS });
 }
 
 function renderConsentHtml(clientInfo: any, oauthReqInfo: any, csrfToken: string, originalSearch: string): string {
@@ -1275,6 +1371,7 @@ function renderConsentHtml(clientInfo: any, oauthReqInfo: any, csrfToken: string
   button[value="approve"] { background: #0a66c2; color: white; border-color: #0a66c2; }
   button[value="deny"] { background: transparent; }
   .note { font-size: 0.8rem; opacity: 0.7; margin-top: 1rem; }
+  .pw-input { width: 100%; padding: 0.6rem 0.75rem; margin-top: 0.4rem; border-radius: 8px; border: 1px solid #ccc; font-size: 1rem; box-sizing: border-box; }
 </style>
 </head>
 <body>
@@ -1296,6 +1393,10 @@ function renderConsentHtml(clientInfo: any, oauthReqInfo: any, csrfToken: string
 
     <form method="POST" action="${action}">
       <input type="hidden" name="csrfToken" value="${csrfToken}">
+      <div class="section">
+        <label for="ownerPassword"><strong>Owner password:</strong></label>
+        <input class="pw-input" type="password" id="ownerPassword" name="ownerPassword" required autocomplete="current-password">
+      </div>
       <div class="actions">
         <button type="submit" name="action" value="approve">Approve</button>
         <button type="submit" name="action" value="deny">Deny</button>
