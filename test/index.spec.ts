@@ -113,9 +113,12 @@ describe("Upwork MCP server", () => {
 
 		it("refreshUpworkToken throws UpworkAuthError with the HTTP status on a definitive auth failure", async () => {
 			vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("invalid_grant", { status: 401 })));
-			await expect(refreshUpworkToken("badrt", "cid", "csecret")).rejects.toBeInstanceOf(UpworkAuthError);
-			vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("invalid_grant", { status: 401 })));
-			await expect(refreshUpworkToken("badrt", "cid", "csecret")).rejects.toMatchObject({ status: 401 });
+			let caught: unknown;
+			await refreshUpworkToken("badrt", "cid", "csecret").catch((e) => {
+				caught = e;
+			});
+			expect(caught).toBeInstanceOf(UpworkAuthError);
+			expect(caught).toMatchObject({ status: 401 });
 		});
 
 		it("refreshUpworkToken throws when the 200 response is missing access_token", async () => {
